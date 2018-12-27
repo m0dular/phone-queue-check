@@ -4,11 +4,13 @@ from __future__ import print_function
 from requests_toolbelt.multipart import decoder
 import requests, json, sys, ConfigParser, traceback
 import pprint
+import datetime
+import pytz
 
 def main(args):
     try:
         cfg = ConfigParser.ConfigParser()
-        cfg.read('/tmp/call_queue.config')
+        cfg.read('./call_queue.config')
 
         api_params = dict(cfg.items('dev'))
         users = {}
@@ -51,6 +53,29 @@ def main(args):
         print("Error in api calls")
         print(traceback.format_exc(e))
         exit(1)
+
+    for k,v in users.iteritems():
+        if users[k]['status'] != 'TakeAllCalls':
+            users[k]['availability'] = 'Unavailable'
+        else:
+            r = requests.get('https://platform.ringcentral.com/restapi/v1.0/account/2062564011/extension/%s/'
+                    % k, params=api_params)
+            tz = pytz.timezone(r.json().get('regionalSettings')['timezone']['name'])
+            today = datetime.datetime.now(tz)
+            today_day = today.strftime("%A")
+
+            r = requests.get('https://platform.ringcentral.com/restapi/v1.0/account/2062564011/extension/%s/business-hours'
+                    % k, params=api_params)
+            hours = r.json().get('schedule')['weeklyRanges'][today_day.lower()][0]
+            _from = datetime.datetime(today.year, today.month, today.day, int(hours['from'].split(':')[0]),
+                    int(hours['from'].split(':')[1]), today.second, today.microsecond, tzinfo=None)
+            _to = datetime.datetime(today.year, today.month, today.day, int(hours['to'].split(':')[0]),
+                    int(hours['to'].split(':')[1]), today.second, today.microsecond, tzinfo=None)
+
+            if _from < today.replace(tzinfo=None) < _to:
+                users[k]['availability'] = 'Available'
+            else:
+                users[k]['availability'] = 'Unavailable'
 
     pprint.pprint(users)
 
